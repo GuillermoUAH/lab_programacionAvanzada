@@ -8,6 +8,7 @@ import zonas.ZonaUpsideDown;
 
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+import static java.lang.Thread.sleep;
 
 public class Portal {
 
@@ -16,21 +17,19 @@ public class Portal {
     private final int tamanoGrupo;
 
     private final ReentrantLock lock = new ReentrantLock(true); // fair
-    private final Condition condGrupoIda      = lock.newCondition();
-    private final Condition condGrupoVuelta   = lock.newCondition();
-    private final Condition condCruce         = lock.newCondition();
+    private final Condition condIda   = lock.newCondition(); // espera formación/cruce de grupo
+    private final Condition condCruce = lock.newCondition(); // espera turno de cruce individual
 
-    // Niños esperando para entrar al Upside Down
-    private int esperandoIda     = 0;
-    // Niños esperando para volver a Hawkins
-    private int esperandoVuelta  = 0;
-    // Si alguien está cruzando ahora mismo
-    private boolean cruzando     = false;
-
-    // Grupo de ida formándose
-    private int grupoActualIda   = 0;
-    // Generación del grupo (para que grupos distintos no se mezclen)
-    private int generacionGrupo  = 0;
+    // Niños acumulándose para formar el siguiente grupo
+    private int esperandoIda    = 0;
+    // El grupo está completo (N alcanzados), nadie más puede unirse hasta que todos transicionen
+    private boolean grupoCompleto = false;
+    // Miembros del grupo actual esperando su turno de cruce
+    private int enGrupo         = 0;
+    // Alguien cruzando físicamente ahora mismo
+    private boolean cruzando    = false;
+    // Niños esperando regresar a Hawkins (prioridad)
+    private int esperandoVuelta = 0;
 
     public Portal(String nombre, ZonaUpsideDown zonaDestino, int tamanoGrupo) {
         this.nombre      = nombre;
@@ -40,51 +39,53 @@ public class Portal {
 
     /**
      * Un niño cruza desde Hawkins al Upside Down.
-     * Espera a formar grupo del tamaño requerido.
-     * Si hay niños esperando para volver, ellos tienen prioridad.
+     * Espera a formar un grupo del tamaño requerido (exclusivo).
+     * Una vez formado, cruzan uno a uno; los que regresan tienen prioridad.
      */
     public void cruzarHaciaUpsideDown(Nino nino) throws InterruptedException {
         lock.lock();
         try {
-            // Esperar si portales bloqueados (apagón)
-            while (EstadoGlobal.getInstancia().isPortalesBloqueados()) {
-                condGrupoIda.await();
-            }
-
-            // Unirse al grupo actual
-            esperandoIda++;
-            int miGeneracion = generacionGrupo;
-
-            // Esperar hasta que el grupo esté completo Y no haya nadie volviendo
-            while (grupoActualIda < tamanoGrupo - 1
-                    || esperandoVuelta > 0
-                    || miGeneracion != generacionGrupo
+            // Fase 1: esperar para poder unirse a la formación del grupo
+            // No se puede unir si: hay un grupo cruzando, hay un grupo completo formándose,
+            // o los portales están bloqueados (apagón).
+            while (enGrupo > 0 || grupoCompleto
                     || EstadoGlobal.getInstancia().isPortalesBloqueados()) {
-
-                if (grupoActualIda == 0 && miGeneracion != generacionGrupo) {
-                    // Nuestro grupo ya pasó, unirnos al siguiente
-                    miGeneracion = generacionGrupo;
-                }
-                grupoActualIda++;
-                if (grupoActualIda >= tamanoGrupo) {
-                    // Grupo completo, avisar
-                    grupoActualIda = 0;
-                    generacionGrupo++;
-                    condGrupoIda.signalAll();
-                    break;
-                }
-                condGrupoIda.await();
-                while (EstadoGlobal.getInstancia().isPortalesBloqueados()) {
-                    condGrupoIda.await();
-                }
+                condIda.await();
             }
 
-            // Esperar turno para cruzar uno a uno
+            // Unirse al grupo en formación
+            esperandoIda++;
+
+            // Si somos el niño N, el grupo está completo
+            if (esperandoIda == tamanoGrupo) {
+                grupoCompleto = true;
+                condIda.signalAll(); // despertar a los N-1 que esperan
+            }
+
+            // Fase 2: esperar a que el grupo esté completo, no haya vuelta pendiente
+            // y el portal no esté bloqueado
+            while (!grupoCompleto || esperandoVuelta > 0
+                    || EstadoGlobal.getInstancia().isPortalesBloqueados()) {
+                condIda.await();
+            }
+
+            // Transición: pasar de "formando grupo" a "en grupo cruzando"
+            esperandoIda--;
+            enGrupo++;
+
+            // El último en transicionar resetea grupoCompleto para que se pueda
+            // empezar a formar el siguiente (pero enGrupo > 0 lo bloqueará hasta que crucemos)
+            if (esperandoIda == 0) {
+                grupoCompleto = false;
+                condIda.signalAll();
+            }
+
+            // Fase 3: esperar turno para cruzar uno a uno (prioridad a vuelta)
             while (cruzando || esperandoVuelta > 0) {
                 condCruce.await();
             }
             cruzando = true;
-            esperandoIda--;
+            enGrupo--;
 
         } finally {
             lock.unlock();
@@ -93,12 +94,15 @@ public class Portal {
         // Cruzar (1 segundo)
         Logger.getInstancia().log("El niño " + nino.getIdHawkins()
                 + " cruza el portal hacia " + nombre);
-        Thread.sleep(1000);
+        sleep(1000);
         zonaDestino.entrarNino(nino);
 
         lock.lock();
         try {
             cruzando = false;
+            if (enGrupo == 0) {
+                condIda.signalAll(); // todos cruzaron, el siguiente grupo puede formarse
+            }
             condCruce.signalAll();
         } finally {
             lock.unlock();
@@ -115,7 +119,7 @@ public class Portal {
             zonaDestino.salirNino(nino);
             esperandoVuelta++;
 
-            // Esperar turno para cruzar (prioridad sobre ida)
+            // Esperar turno (prioridad: solo espera si alguien ya está cruzando)
             while (cruzando) {
                 condCruce.await();
             }
@@ -129,17 +133,16 @@ public class Portal {
         // Cruzar (1 segundo)
         Logger.getInstancia().log("El niño " + nino.getIdHawkins()
                 + " regresa por el portal desde " + nombre);
-        Thread.sleep(1000);
+        sleep(1000);
 
         lock.lock();
         try {
             cruzando = false;
-            // Avisar primero a los que vuelven, luego a los de ida
-            if (esperandoVuelta > 0) {
-                condCruce.signalAll();
-            } else {
-                condCruce.signalAll();
-                condGrupoIda.signalAll(); // desbloquear ida si el apagón terminó
+            // Despertar a los que esperan: si hay más vuelta, los primeros en cruzar;
+            // si no, despertar también a los de ida para que el grupo pueda proceder
+            condCruce.signalAll();
+            if (esperandoVuelta == 0) {
+                condIda.signalAll();
             }
         } finally {
             lock.unlock();
@@ -151,18 +154,23 @@ public class Portal {
      */
     public void desbloquear() {
         lock.lock();
-        try { condGrupoIda.signalAll(); }
+        try {
+            condIda.signalAll();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public String getNombre()              { return nombre; }
+    public ZonaUpsideDown getZonaDestino() { return zonaDestino; }
+
+    public int getEsperandoIda() {
+        lock.lock();
+        try { return esperandoIda + enGrupo; }
         finally { lock.unlock(); }
     }
 
-    public String getNombre()          { return nombre; }
-    public ZonaUpsideDown getZonaDestino() { return zonaDestino; }
-    public int getEsperandoIda()       {
-        lock.lock();
-        try { return esperandoIda; }
-        finally { lock.unlock(); }
-    }
-    public int getEsperandoVuelta()    {
+    public int getEsperandoVuelta() {
         lock.lock();
         try { return esperandoVuelta; }
         finally { lock.unlock(); }

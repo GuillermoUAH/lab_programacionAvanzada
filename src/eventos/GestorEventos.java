@@ -4,15 +4,11 @@ package eventos;
 import sistema.EstadoGlobal;
 import sistema.Logger;
 import portales.Portal;
-
-import java.util.Random;
+import static java.lang.Thread.sleep;
 
 public class GestorEventos extends Thread {
 
-    private static final Random rnd = new Random();
-
     public GestorEventos() {
-        setDaemon(true); // muere cuando muere el programa
     }
 
     @Override
@@ -25,36 +21,28 @@ public class GestorEventos extends Thread {
                 eg.checkPausa();
 
                 // Esperar entre 30 y 60 segundos antes del siguiente evento
-                int espera = 30000 + rnd.nextInt(30000);
-                Thread.sleep(espera);
+                int espera = 30000 + (int)(Math.random() * 30000);
+                sleep(espera);
 
                 eg.checkPausa();
 
                 // Elegir evento aleatorio
                 TipoEvento[] tipos = TipoEvento.values();
-                TipoEvento tipo = tipos[rnd.nextInt(tipos.length)];
+                TipoEvento tipo = tipos[(int)(Math.random() * tipos.length)];
 
                 // Duración entre 5 y 10 segundos
-                long duracion = 5000 + rnd.nextInt(5000);
+                long duracion = 5000 + (int)(Math.random() * 5000);
 
-                EventoGlobal evento = new EventoGlobal(tipo, duracion);
                 eg.activarEvento(tipo, duracion);
 
                 log.log("EVENTO GLOBAL: " + nombreEvento(tipo) + " iniciado");
 
-                // Acción inmediata para Eleven
-                if (tipo == TipoEvento.INTERVENCION_ELEVEN) {
-                    int sangre = eg.consumirSangreParaEleven();
-                    if (sangre > 0) {
-                        eg.getColmena().liberarNinos(sangre);
-                        log.log("Eleven libera " + sangre + " niños de la COLMENA");
-                    } else {
-                        log.log("Eleven interviene pero no hay sangre acumulada");
-                    }
-                }
+                // Para Eleven: anotar cuánta sangre había ANTES de que empiece el evento.
+                // Al terminar se librarán tantos niños como sangre se haya recogido DURANTE el evento.
+                int sangreAntesEleven = (tipo == TipoEvento.INTERVENCION_ELEVEN) ? eg.getSangreTotal() : 0;
 
                 // Esperar a que termine el evento
-                Thread.sleep(duracion);
+                sleep(duracion);
 
                 eg.desactivarEvento();
                 log.log("EVENTO GLOBAL: " + nombreEvento(tipo) + " finalizado");
@@ -63,6 +51,17 @@ public class GestorEventos extends Thread {
                 if (tipo == TipoEvento.APAGON_LABORATORIO) {
                     for (Portal p : eg.getPortales()) {
                         p.desbloquear();
+                    }
+                }
+
+                // Eleven: contar solo la sangre recogida DURANTE el evento (no la anterior)
+                if (tipo == TipoEvento.INTERVENCION_ELEVEN) {
+                    int sangreRecogida = eg.getSangreTotal() - sangreAntesEleven;
+                    if (sangreRecogida > 0) {
+                        eg.getColmena().liberarNinos(sangreRecogida);
+                        log.log("Eleven libera " + sangreRecogida + " niños de la COLMENA");
+                    } else {
+                        log.log("Eleven interviene pero no se recogió sangre durante el evento");
                     }
                 }
             }

@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class EstadoGlobal {
 
     private static EstadoGlobal instancia;
-    private static final Object lockInstancia = new Object();
+    private static final ReentrantLock lockInstancia = new ReentrantLock();
 
     // ── Zonas Hawkins ──────────────────────────────────────────────
     private final ZonaHawkins callePrincipal;
@@ -88,8 +88,11 @@ public class EstadoGlobal {
 
     public static EstadoGlobal getInstancia() {
         if (instancia == null) {
-            synchronized (lockInstancia) {
+            lockInstancia.lock();
+            try {
                 if (instancia == null) instancia = new EstadoGlobal();
+            } finally {
+                lockInstancia.unlock();
             }
         }
         return instancia;
@@ -132,7 +135,7 @@ public class EstadoGlobal {
     }
 
     // ── Sangre ────────────────────────────────────────────────────
-    public void añadirSangre(int cantidad) { sangreTotal.addAndGet(cantidad); }
+    public void aniadirSangre(int cantidad) { sangreTotal.addAndGet(cantidad); }
     public int getSangreTotal() { return sangreTotal.get(); }
 
     /**
@@ -173,10 +176,6 @@ public class EstadoGlobal {
         Logger.getInstancia().log("Vecna genera un nuevo demogorgon: " + idStr);
     }
 
-    public String getSiguienteDemogorgonId() {
-        return String.format("D%04d", nextDemogorgonId.getAndIncrement());
-    }
-
     // ── Evento global ─────────────────────────────────────────────
     public void activarEvento(TipoEvento tipo, long duracionMs) {
         lockEvento.lock();
@@ -205,8 +204,7 @@ public class EstadoGlobal {
     private void aplicarEfectosEvento(TipoEvento tipo, boolean activar) {
         switch (tipo) {
             case APAGON_LABORATORIO:
-                portalesBloqueados      = activar;
-                demogorgonsParalizados  = false;
+                portalesBloqueados = activar;
                 break;
             case TORMENTA_UPSIDE_DOWN:
                 tormentaActiva = activar;

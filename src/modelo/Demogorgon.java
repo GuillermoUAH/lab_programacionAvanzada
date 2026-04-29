@@ -1,19 +1,19 @@
-// distribuido/Demogorgon.java
+// modelo/Demogorgon.java
 package modelo;
 
 import sistema.EstadoGlobal;
 import sistema.Logger;
 import zonas.ZonaUpsideDown;
 import zonas.Colmena;
-
-import java.util.Random;
+import static java.lang.Thread.sleep;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Demogorgon extends Thread {
 
     private final String id;
     private int capturas = 0;
     private ZonaUpsideDown zonaActual;
-    private static final Random rnd = new Random();
 
     public Demogorgon(String id) {
         this.id = id;
@@ -35,7 +35,7 @@ public class Demogorgon extends Thread {
 
                 // ── Paralizado por Eleven ─────────────────────────────────
                 while (eg.isDemogorgonsParalizados()) {
-                    Thread.sleep(200);
+                    sleep(200);
                     eg.checkPausa();
                 }
 
@@ -51,22 +51,24 @@ public class Demogorgon extends Thread {
 
                 if (objetivo != null && !objetivo.isCapturado()) {
                     // ── ATACAR ────────────────────────────────────────────
+                    // Avisar al niño: queda bloqueado hasta que el ataque termine
+                    objetivo.iniciarAtaque();
                     log.log("El demogorgon " + id + " ataca al niño "
                             + objetivo.getIdHawkins() + " (capturas: " + capturas + ")");
 
                     // Duración del ataque: 0.5 - 1.5 seg (x0.5 si tormenta)
-                    int duracion = 500 + rnd.nextInt(1000);
-                    if (eg.isTormentaActiva()) duracion /= 2;
-                    Thread.sleep(duracion);
+                    int base = 500 + (int)(Math.random() * 1000);
+                    int duracion = eg.isTormentaActiva() ? base / 2 : base;
+                    sleep(duracion);
 
                     eg.checkPausa();
                     while (eg.isDemogorgonsParalizados()) {
-                        Thread.sleep(200);
+                        sleep(200);
                         eg.checkPausa();
                     }
 
                     // Probabilidad de captura: 1/3
-                    boolean capturado = rnd.nextInt(3) == 0;
+                    boolean capturado = (int)(Math.random() * 3) == 0;
 
                     if (capturado && !objetivo.isCapturado()) {
                         // ── CAPTURA EXITOSA ───────────────────────────────
@@ -74,9 +76,9 @@ public class Demogorgon extends Thread {
                         Colmena colmena = eg.getColmena();
 
                         // Llevar a la colmena: 0.5 - 1 seg
-                        Thread.sleep(500 + rnd.nextInt(500));
+                        sleep(500 + (int)(Math.random() * 500));
                         colmena.depositar(objetivo);
-                        objetivo.serCapturado(); // bloquea al niño
+                        objetivo.capturar(); // bloquea al niño en el ciclo de captura
 
                         capturas++;
                         log.log("El demogorgon " + id + " captura al niño "
@@ -88,17 +90,20 @@ public class Demogorgon extends Thread {
                                 + " resiste el ataque de " + id);
                     }
 
+                    // Ataque terminado: desbloquear al niño (haya sido capturado o no)
+                    objetivo.finalizarAtaque();
+
                 } else {
                     // ── SIN OBJETIVO: esperar 4-5 seg ─────────────────────
                     log.log("El demogorgon " + id + " patrulla " + zonaActual.getNombre()
                             + " (vacío)");
-                    Thread.sleep(4000 + rnd.nextInt(1000));
+                    sleep(4000 + (int)(Math.random() * 1000));
                 }
 
                 eg.checkPausa();
 
                 // ── Moverse a zona aleatoria (si no está paralizado ni red mental) ──
-                if (!eg.isDemogorgonsParalizados()) {
+                if (!eg.isDemogorgonsParalizados() && !eg.isPortalesBloqueados()) {
                     ZonaUpsideDown siguiente = eg.isRedMentalActiva()
                             ? getZonaConMasNinos(eg)
                             : zonaAleatoriaDiferente(eg);
@@ -108,6 +113,7 @@ public class Demogorgon extends Thread {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            System.out.println("InterruptedException en "+id);
         }
     }
 
@@ -122,16 +128,15 @@ public class Demogorgon extends Thread {
 
     private ZonaUpsideDown zonaAleatoria(EstadoGlobal eg) {
         ZonaUpsideDown[] zonas = eg.getZonasUpsideDown();
-        return zonas[rnd.nextInt(zonas.length)];
+        return zonas[(int)(Math.random() * zonas.length)];
     }
 
     private ZonaUpsideDown zonaAleatoriaDiferente(EstadoGlobal eg) {
-        ZonaUpsideDown[] zonas = eg.getZonasUpsideDown();
-        ZonaUpsideDown siguiente;
-        do {
-            siguiente = zonas[rnd.nextInt(zonas.length)];
-        } while (siguiente.getNombre().equals(zonaActual.getNombre()));
-        return siguiente;
+        List<ZonaUpsideDown> otras = new ArrayList<>();
+        for (ZonaUpsideDown z : eg.getZonasUpsideDown()) {
+            if (!z.getNombre().equals(zonaActual.getNombre())) otras.add(z);
+        }
+        return otras.get((int)(Math.random() * otras.size()));
     }
 
     private ZonaUpsideDown getZonaConMasNinos(EstadoGlobal eg) {
@@ -143,9 +148,7 @@ public class Demogorgon extends Thread {
         return mejor;
     }
 
-    public String getIdHawkins()  { return id; }
-    public int getCapturas()      { return capturas; }
-    public void incrementarCapturas() { capturas++; }
+    public String getIdHawkins()         { return id; }
+    public int getCapturas()             { return capturas; }
     public ZonaUpsideDown getZonaActual() { return zonaActual; }
-    public void setZonaActual(ZonaUpsideDown zona) { zonaActual = zona; }
 }

@@ -3,41 +3,41 @@ package zonas;
 
 import modelo.Nino;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class ZonaHawkins {
 
     private final String nombre;
     private final List<Nino> ninos = new ArrayList<>();
-    private final Object lock = new Object();
+    private final ReentrantLock lock = new ReentrantLock();
 
     public ZonaHawkins(String nombre) {
         this.nombre = nombre;
     }
 
     public void entrar(Nino nino) {
-        synchronized (lock) {
-            ninos.add(nino);
-        }
+        lock.lock();
+        try { ninos.add(nino); }
+        finally { lock.unlock(); }
     }
 
     public void salir(Nino nino) {
-        synchronized (lock) {
-            ninos.remove(nino);
-        }
+        lock.lock();
+        try { ninos.remove(nino); }
+        finally { lock.unlock(); }
     }
 
     public List<Nino> getNinos() {
-        synchronized (lock) {
-            return Collections.unmodifiableList(new ArrayList<>(ninos));
-        }
+        lock.lock();
+        try { return new ArrayList<>(ninos); }
+        finally { lock.unlock(); }
     }
 
     public int getNumNinos() {
-        synchronized (lock) {
-            return ninos.size();
-        }
+        lock.lock();
+        try { return ninos.size(); }
+        finally { lock.unlock(); }
     }
 
     public String getNombre() { return nombre; }
